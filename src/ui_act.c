@@ -50,7 +50,9 @@ static inline void BarUiDoSkipSong (struct audioPlayer *player) {
 	assert (player != NULL);
 
 	player->doQuit = 1;
-	pthread_kill (player->thread, SIGUSR2);
+	if (player->paused) {
+		pthread_kill (player->thread, SIGUSR2);
+	}
 }
 
 /*	transform station if necessary to allow changes like rename, rate, ...
@@ -342,11 +344,12 @@ BarUiActCallback(BarUiActMoveSong) {
 /*	pause
  */
 BarUiActCallback(BarUiActPause) {
+	fprintf (stderr, "fired\n");
 	if (app->player.paused) {
-		pthread_kill (app->player.thread, SIGUSR2);
+		pthread_kill (app->player.thread, SIGCONT);
 		app->player.paused = false;
 	} else {
-		pthread_kill (app->player.thread, SIGUSR1);
+		pthread_kill (app->player.thread, SIGSTOP);
 		app->player.paused = true;
 	}
 }
