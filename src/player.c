@@ -23,12 +23,15 @@ THE SOFTWARE.
 
 /* receive/play audio stream */
 
+#define _POSIX_C_SOURCE 1
+
 #include <unistd.h>
 #include <string.h>
 #include <math.h>
 #include <stdint.h>
 #include <limits.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #include "player.h"
 #include "config.h"
@@ -40,8 +43,6 @@ THE SOFTWARE.
 /* wait while locked, but don't slow down main thread by keeping
  * locks too long */
 #define QUIT_PAUSE_CHECK \
-	pthread_mutex_lock (&player->pauseMutex); \
-	pthread_mutex_unlock (&player->pauseMutex); \
 	if (player->doQuit) { \
 		/* err => abort playback */ \
 		return WAITRESS_CB_RET_ERR; \
@@ -77,6 +78,15 @@ static inline signed short int applyReplayGain (const signed short int value,
 	} else {
 		return tmpReplayBuf / RG_SCALE_FACTOR;
 	}
+}
+
+static void pauseHandler (int sig) {
+	printf ("got signal!\n");
+	int newsig;
+	sigset_t set;
+	sigemptyset (&set);
+	sigaddset (&set, SIGUSR2);
+	sigwait (&set, &newsig);
 }
 
 /*	Refill player's buffer with dataSize of data
@@ -419,9 +429,15 @@ void *BarPlayerThread (void *data) {
 	NeAACDecConfigurationPtr conf;
 	#endif
 	WaitressReturn_t wRet = WAITRESS_RET_ERR;
+	struct sigaction sa;
+
+	memset (&sa, 0, sizeof (sa));
+	sa.sa_handler = pauseHandler;
+	sigaction (SIGUSR1, &sa, NULL);
+	sa.sa_handler = SIG_IGN;
+	sigaction (SIGUSR2, &sa, NULL);
 
 	/* init handles */
-	pthread_mutex_init (&player->pauseMutex, NULL);
 	player->waith.data = (void *) player;
 	/* extraHeaders will be initialized later */
 	player->waith.extraHeaders = extraHeaders;
@@ -498,7 +514,6 @@ void *BarPlayerThread (void *data) {
 
 	ao_close(player->audioOutDevice);
 	WaitressFree (&player->waith);
-	pthread_mutex_destroy (&player->pauseMutex);
 	free (player->buffer);
 
 	player->mode = PLAYER_FINISHED_PLAYBACK;

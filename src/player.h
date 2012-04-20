@@ -101,7 +101,8 @@ struct audioPlayer {
 
 	unsigned char *buffer;
 
-	pthread_mutex_t pauseMutex;
+	bool paused;
+	pthread_t thread;
 	WaitressHandle_t waith;
 };
 

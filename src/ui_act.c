@@ -25,8 +25,8 @@ THE SOFTWARE.
 
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <assert.h>
+#include <signal.h>
 
 #include "ui.h"
 #include "ui_readline.h"
@@ -50,9 +50,7 @@ static inline void BarUiDoSkipSong (struct audioPlayer *player) {
 	assert (player != NULL);
 
 	player->doQuit = 1;
-	/* unlocking an unlocked mutex is forbidden by some implementations */
-	pthread_mutex_trylock (&player->pauseMutex);
-	pthread_mutex_unlock (&player->pauseMutex);
+	pthread_kill (player->thread, SIGUSR2);
 }
 
 /*	transform station if necessary to allow changes like rename, rate, ...
@@ -344,9 +342,12 @@ BarUiActCallback(BarUiActMoveSong) {
 /*	pause
  */
 BarUiActCallback(BarUiActPause) {
-	/* already locked => unlock/unpause */
-	if (pthread_mutex_trylock (&app->player.pauseMutex) == EBUSY) {
-		pthread_mutex_unlock (&app->player.pauseMutex);
+	if (app->player.paused) {
+		pthread_kill (app->player.thread, SIGUSR2);
+		app->player.paused = false;
+	} else {
+		pthread_kill (app->player.thread, SIGUSR1);
+		app->player.paused = true;
 	}
 }
 
