@@ -23,6 +23,8 @@ THE SOFTWARE.
 
 /* functions responding to user's keystrokes */
 
+#define _POSIX_C_SOURCE 200112L
+
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
@@ -344,7 +346,6 @@ BarUiActCallback(BarUiActMoveSong) {
 /*	pause
  */
 BarUiActCallback(BarUiActPause) {
-	fprintf (stderr, "fired\n");
 	if (app->player.paused) {
 		pthread_kill (app->player.thread, BAR_PLAYER_SIGCONT);
 		app->player.paused = false;
