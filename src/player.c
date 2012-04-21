@@ -80,14 +80,15 @@ static inline signed short int applyReplayGain (const signed short int value,
 	}
 }
 
-static void nullHandler (int sig) {
+/*	handles bogus signal BAR_PLAYER_SIGCONT
+ */
+static void BarPlayerNullHandler (int sig) {
 }
 
-static void pauseHandler (int sig) {
-	sigset_t set;
-	sigemptyset (&set);
-	sigaddset (&set, SIGRTMIN);
-	sigsuspend (&set);
+/*	handler signal BAR_PLAYER_SIGSTOP and pauses player thread
+ */
+static void BarPlayerPauseHandler (int sig) {
+	pause ();
 }
 
 /*	Refill player's buffer with dataSize of data
@@ -433,10 +434,11 @@ void *BarPlayerThread (void *data) {
 	struct sigaction sa;
 
 	memset (&sa, 0, sizeof (sa));
-	sa.sa_handler = pauseHandler;
-	sigaction (SIGRTMIN, &sa, NULL);
-	//sa.sa_handler = pauseHandler;
-	//sigaction (SIGRTMIN+1, &sa, NULL);
+	sa.sa_handler = BarPlayerPauseHandler;
+	sigaction (BAR_PLAYER_SIGSTOP, &sa, NULL);
+	memset (&sa, 0, sizeof (sa));
+	sa.sa_handler = BarPlayerNullHandler;
+	sigaction (BAR_PLAYER_SIGCONT, &sa, NULL);
 
 	/* init handles */
 	player->waith.data = (void *) player;
