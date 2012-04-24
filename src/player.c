@@ -40,14 +40,6 @@ THE SOFTWARE.
 
 #define bigToHostEndian32(x) ntohl(x)
 
-/* wait while locked, but don't slow down main thread by keeping
- * locks too long */
-#define QUIT_PAUSE_CHECK \
-	if (player->doQuit) { \
-		/* err => abort playback */ \
-		return WAITRESS_CB_RET_ERR; \
-	}
-
 /* pandora uses float values with 2 digits precision. Scale them by 100 to get
  * a "nice" integer */
 #define RG_SCALE_FACTOR 100
@@ -136,8 +128,6 @@ static WaitressCbReturn_t BarPlayerAACCb (void *ptr, size_t size,
 	const char *data = ptr;
 	struct audioPlayer *player = stream;
 
-	QUIT_PAUSE_CHECK;
-
 	if (!BarPlayerBufferFill (player, data, size)) {
 		return WAITRESS_CB_RET_ERR;
 	}
@@ -171,9 +161,6 @@ static WaitressCbReturn_t BarPlayerAACCb (void *ptr, size_t size,
 					(unsigned long long int) player->channels;
 			player->bufferRead += frameInfo.bytesconsumed;
 			player->sampleSizeCurr++;
-			/* going through this loop can take up to a few seconds =>
-			 * allow earlier thread abort */
-			QUIT_PAUSE_CHECK;
 		}
 	} else {
 		if (player->mode == PLAYER_INITIALIZED) {
@@ -326,8 +313,6 @@ static WaitressCbReturn_t BarPlayerMp3Cb (void *ptr, size_t size,
 	struct audioPlayer *player = stream;
 	size_t i;
 
-	QUIT_PAUSE_CHECK;
-
 	if (!BarPlayerBufferFill (player, data, size)) {
 		return WAITRESS_CB_RET_ERR;
 	}
@@ -407,8 +392,6 @@ static WaitressCbReturn_t BarPlayerMp3Cb (void *ptr, size_t size,
 					(unsigned long long int) BAR_PLAYER_MS_TO_S_FACTOR /
 					(unsigned long long int) player->samplerate;
 		}
-
-		QUIT_PAUSE_CHECK;
 	} while (player->mp3Stream.error != MAD_ERROR_BUFLEN);
 
 	player->bufferRead += player->mp3Stream.next_frame - player->buffer;
@@ -418,6 +401,42 @@ static WaitressCbReturn_t BarPlayerMp3Cb (void *ptr, size_t size,
 	return WAITRESS_CB_RET_OK;
 }
 #endif /* ENABLE_MAD */
+
+/*	player cleanup function
+ * 	@param player structure
+ */
+static void BarPlayerCleanup (void *data) {
+	struct audioPlayer *player = data;
+
+	printf ("cleanup handler called\n");
+	switch (player->audioFormat) {
+		#ifdef ENABLE_FAAD
+		case PIANO_AF_AACPLUS:
+			NeAACDecClose(player->aacHandle);
+			free (player->sampleSize);
+			break;
+		#endif /* ENABLE_FAAD */
+
+		#ifdef ENABLE_MAD
+		case PIANO_AF_MP3:
+		case PIANO_AF_MP3_HI:
+			mad_synth_finish (&player->mp3Synth);
+			mad_frame_finish (&player->mp3Frame);
+			mad_stream_finish (&player->mp3Stream);
+			break;
+		#endif /* ENABLE_MAD */
+
+		default:
+			/* this should never happen */
+			break;
+	}
+
+	ao_close(player->audioOutDevice);
+	WaitressFree (&player->waith);
+	free (player->buffer);
+
+	player->mode = PLAYER_FINISHED_PLAYBACK;
+}
 
 /*	player thread; for every song a new thread is started
  *	@param audioPlayer structure
@@ -433,12 +452,15 @@ void *BarPlayerThread (void *data) {
 	WaitressReturn_t wRet = WAITRESS_RET_ERR;
 	struct sigaction sa;
 
+	/* set up pause signals */
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = BarPlayerPauseHandler;
 	sigaction (BAR_PLAYER_SIGSTOP, &sa, NULL);
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = BarPlayerNullHandler;
 	sigaction (BAR_PLAYER_SIGCONT, &sa, NULL);
+	/* set up cleanup function */
+	pthread_cleanup_push (BarPlayerCleanup, data);
 
 	/* init handles */
 	player->waith.data = (void *) player;
@@ -472,9 +494,8 @@ void *BarPlayerThread (void *data) {
 		#endif /* ENABLE_MAD */
 
 		default:
-			/* FIXME: leaks memory */
 			BarUiMsg (player->settings, MSG_ERR, "Unsupported audio format!\n");
-			return PLAYER_RET_OK;
+			pthread_exit (PLAYER_RET_OK);
 			break;
 	}
 	
@@ -489,37 +510,11 @@ void *BarPlayerThread (void *data) {
 	} while (wRet == WAITRESS_RET_PARTIAL_FILE || wRet == WAITRESS_RET_TIMEOUT
 			|| wRet == WAITRESS_RET_READ_ERR);
 
-	switch (player->audioFormat) {
-		#ifdef ENABLE_FAAD
-		case PIANO_AF_AACPLUS:
-			NeAACDecClose(player->aacHandle);
-			free (player->sampleSize);
-			break;
-		#endif /* ENABLE_FAAD */
-
-		#ifdef ENABLE_MAD
-		case PIANO_AF_MP3:
-		case PIANO_AF_MP3_HI:
-			mad_synth_finish (&player->mp3Synth);
-			mad_frame_finish (&player->mp3Frame);
-			mad_stream_finish (&player->mp3Stream);
-			break;
-		#endif /* ENABLE_MAD */
-
-		default:
-			/* this should never happen: thread is aborted above */
-			break;
-	}
-
 	if (player->aoError) {
 		ret = (void *) PLAYER_RET_ERR;
 	}
 
-	ao_close(player->audioOutDevice);
-	WaitressFree (&player->waith);
-	free (player->buffer);
-
-	player->mode = PLAYER_FINISHED_PLAYBACK;
-
+	/* cleanup */
+	pthread_cleanup_pop (!0);
 	return ret;
 }

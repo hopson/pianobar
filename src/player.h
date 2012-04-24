@@ -51,7 +51,6 @@ THE SOFTWARE.
 #define BAR_PLAYER_SIGCONT SIGRTMIN+1
 
 struct audioPlayer {
-	char doQuit;
 	unsigned char channels;
 	unsigned char aoError;
 
