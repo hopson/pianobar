@@ -241,6 +241,9 @@ BarUiActCallback(BarUiActSongInfo) {
 			selStation->isQuickMix ?
 			PianoFindStationById (app->ph.stations, selSong->stationId) :
 			NULL);
+	BarUiStartEventCmd (&app->settings, "songinfo",
+			app->curStation, app->playlist, &app->player, app->ph.stations,
+			PIANO_RET_OK, WAITRESS_RET_OK);
 }
 
 /*	print some debugging information
@@ -345,9 +348,17 @@ BarUiActCallback(BarUiActMoveSong) {
  */
 BarUiActCallback(BarUiActPause) {
 	/* already locked => unlock/unpause */
+	char* event;
 	if (pthread_mutex_trylock (&app->player.pauseMutex) == EBUSY) {
+		event = "songunpause";
 		pthread_mutex_unlock (&app->player.pauseMutex);
+	} else {
+		event = "songpause";
 	}
+	BarUiStartEventCmd (&app->settings, event,
+			app->curStation, app->playlist, &app->player, app->ph.stations,
+			PIANO_RET_OK, WAITRESS_RET_OK);
+
 }
 
 /*	rename current station
